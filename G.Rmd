@@ -1,0 +1,223 @@
+---
+title: '1'
+author: "Lambridge"
+date: "2021/12/15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(tidyverse)
+library(tmap)
+library(geojsonio)
+library(plotly)
+library(rgdal)
+library(broom)
+library(mapview)
+library(crosstalk)
+library(sf)
+library(sp)
+library(spdep)
+library(car)
+library(fs)
+library(janitor)
+```
+
+```{r}
+SanFranciscoBoroughs <- st_read(here::here("data","geo_export_d80a3dd3-412b-48e6-ad9c-c5c6349fcbbf.shp"))
+```
+
+```{r}
+tmap_mode("view")
+qtm(SanFranciscoBoroughs)
+```
+
+```{r}
+SanFranciscoBoroughs <- SanFranciscoBoroughs %>% 
+  filter(aland10 != 419323)
+```
+
+```{r}
+qtm(SanFranciscoBoroughs)
+```
+
+```{r}
+print(SanFranciscoBoroughs)
+```
+
+```{r}
+shape <- SanFranciscoBoroughs %>%
+    st_transform(., crs=7131)
+```
+
+```{r}
+qtm(shape)
+```
+
+```{r}
+Graffiti<- read.csv(here::here("data","Graffiti.csv"), 
+                         header = TRUE, sep = ",",  
+                         encoding = "latin1",
+                    ) %>% 
+  na.omit()
+```
+
+```{r}
+graffiti2<-Graffiti%>%
+  separate(., Point, c("A", "B"), sep = ",")
+  
+graffiti2$A<-parse_number(graffiti2$A) ## leading $ and grouping character , ignored删除数据之前的非
+graffiti2$B<-parse_number(graffiti2$B) ## leading $ and grouping character , ignored
+
+graffiti3<- graffiti2%>%
+  filter(A !=	0 )%>%
+  filter(B != 0)%>%
+  st_as_sf(., coords = c("B", "A"), 
+                   crs = 4326)
+
+graffiti4<- graffiti3%>%
+filter(str_detect(Closed, "2019"))%>%
+  #filter(str_detect(`Request Type`, "Building"))%>%
+  st_transform(., crs=7131)
+```
+
+```{r}
+graffiti_within <- graffiti4[shape, ,op=st_intersects]
+
+tm_shape(shape) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(graffiti4) +
+  tm_dots(col = "blue")
+```
+
+```{r}
+
+  points_sf_joined <- shape%>%
+    st_join(graffiti4)%>%
+    add_count(geoid10)%>%
+    janitor::clean_names()%>%
+    #calculate area
+    mutate(area=st_area(.))%>%
+    #then density of the points per ward
+    mutate(density=n/area)%>%
+    dplyr::select(geoid10 , neighborhood, density)%>%
+    group_by(geoid10) %>%         
+  summarise(geoid10 = first(geoid10),
+          neighborhood= first(neighborhood),
+          density= first(density))
+```
+
+```{r}
+tmap_mode("view")
+tm <- tm_shape(points_sf_joined) + 
+  tm_polygons("density", 
+              palette="PuBu")
+tm
+```
+
+# OLS
+
+```{r}
+census_education <- read_csv(here::here("data","ACSST5Y2019.S1501_data_with_overlays_2021-12-08T045521.csv"),skip=1,
+                             na = c("", "NA", "n/a"),
+                             col_names = TRUE)
+```
+
+```{r}
+census_education2 <- census_education %>% 
+  clean_names()
+```
+
+```{r}
+census_education3 <- shape %>%
+  mutate(joiner = paste("1400000US", geoid10, sep=""))
+```
+
+```{r}
+census_education4 <- census_education3 %>%
+    left_join(.,
+            census_education2, 
+            by = c("joiner" = "id"))
+```
+
+```{r}
+tmap_mode("plot")
+qtm(census_education4, 
+    fill = "estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate", 
+    borders = NULL,  
+    fill.palette = "Blues")
+```
+
+```{r}
+desity <- st_drop_geometry(points_sf_joined) %>% 
+  dplyr::select('density','geoid10')
+census_education5 <- census_education4 %>%
+    left_join(.,
+            desity, 
+            by = c("geoid10" = "geoid10"))
+```
+
+```{r}
+census_education5 <- st_drop_geometry(census_education5)
+```
+
+```{r}
+census_education5 <- census_education5 %>% 
+  as_tibble()
+```
+
+```{r}
+Datatypelist <- census_education5 %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+```{r}
+Datatypelist <- census_education5 %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+```{r}
+census_education5$density<-as.numeric(census_education5$density)
+```
+
+```{r}
+library(spatstat)
+q <- qplot(x = `estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate`, 
+           y = `density`, 
+           data=census_education5)
+#plot with a regression line - note, I've added some jitter here as the x-scale is rounded
+q + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+
+```
+
+```{r}
+#run the linear regression model and store its outputs in an object called model1
+Regressiondata<- census_education5%>%
+  clean_names()%>%
+  dplyr::select(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate,density)
+
+#now model
+model1 <- Regressiondata %>%
+  lm(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate ~density,
+     data=.)
+```
+
+```{r}
+summary(model1)
+```
