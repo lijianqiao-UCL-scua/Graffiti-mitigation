@@ -96,6 +96,17 @@ tm_shape(graffiti4) +
 ```
 
 ```{r}
+Joinfun <- function(data1, data2){
+
+output<- data1%>%
+  st_join(Londonborough,.)%>%
+  add_count(GSS_CODE, name="hotels_in_borough") 
+
+  return(output)
+}
+```
+
+```{r}
 
   points_sf_joined <- shape%>%
     st_join(graffiti4)%>%
@@ -105,17 +116,28 @@ tm_shape(graffiti4) +
     mutate(area=st_area(.))%>%
     #then density of the points per ward
     mutate(density=n/area)%>%
-    dplyr::select(geoid10 , neighborhood, density)%>%
+    dplyr::select(geoid10 , neighborhood, density,n)%>%
     group_by(geoid10) %>%         
   summarise(geoid10 = first(geoid10),
           neighborhood= first(neighborhood),
-          density= first(density))
+          density= first(density),
+          number=first(n))
 ```
 
 ```{r}
 tmap_mode("view")
 tm <- tm_shape(points_sf_joined) + 
   tm_polygons("density", 
+              palette="PuBu")
+tm
+```
+
+```{r}
+breaks1<-c(0,5,100,400,1000,2000,3000,5000)
+tmap_mode("view")
+tm <- tm_shape(points_sf_joined) + 
+  tm_polygons("number",
+              breaks=breaks1,
               palette="PuBu")
 tm
 ```
@@ -155,11 +177,14 @@ qtm(census_education4,
 
 ```{r}
 desity <- st_drop_geometry(points_sf_joined) %>% 
-  dplyr::select('density','geoid10')
+  dplyr::select('density','geoid10','number')
 census_education5 <- census_education4 %>%
     left_join(.,
             desity, 
             by = c("geoid10" = "geoid10"))
+```
+
+``` {census_education5$num}
 ```
 
 ```{r}
@@ -197,13 +222,23 @@ census_education5$density<-as.numeric(census_education5$density)
 
 ```{r}
 library(spatstat)
-q <- qplot(x = `estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate`, 
+q <- qplot(x = `estimate_total_age_by_educational_attainment_population_18_to_24_years`, 
            y = `density`, 
            data=census_education5)
 #plot with a regression line - note, I've added some jitter here as the x-scale is rounded
 q + stat_smooth(method="lm", se=FALSE, size=1) + 
   geom_jitter()
 
+```
+
+```{r}
+library(spatstat)
+q <- qplot(x = `estimate_total_age_by_educational_attainment_population_18_to_24_years`, 
+           y = `number`, 
+           data=census_education5)
+#plot with a regression line - note, I've added some jitter here as the x-scale is rounded
+q + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
 ```
 
 ```{r}
@@ -219,5 +254,193 @@ model1 <- Regressiondata %>%
 ```
 
 ```{r}
+#run the linear regression model and store its outputs in an object called model1
+Regressiondata<- census_education5%>%
+  clean_names()%>%
+  dplyr::select(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate,number)
+
+#now model
+model2 <- Regressiondata %>%
+  lm(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate ~number,
+     data=.)
+```
+
+```{r}
 summary(model1)
+```
+
+```{r}
+summary(model2)
+```
+
+```{r}
+library(broom)
+tidy(model1)
+```
+
+```{r}
+glance(model1)
+
+```
+
+```{r}
+library(tidypredict)
+Regressiondata %>%
+  tidypredict_to_column(model1)
+```
+
+### Assumptions Underpinning Linear Regression
+
+```{r}
+# use Janitor to clean up the names.
+
+census_education5 <- census_education5 %>%
+  clean_names()
+
+#let's check the distribution of these variables first
+
+ggplot(census_education5, aes(x=estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate)) + 
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 5) + 
+  geom_density(colour="red", 
+               size=1, 
+               adjust=1)
+```
+
+```{r}
+ggplot(census_education5, aes(x=density)) +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.1) + 
+  geom_density(colour="red",
+               size=1, 
+               adjust=1)
+```
+
+```{r}
+ggplot(census_education5, aes(x=)) +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.1) + 
+  geom_density(colour="red",
+               size=1, 
+               adjust=1)
+```
+
+```{r}
+ggplot(census_education5, aes(x=estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate)) + 
+  geom_histogram()
+```
+
+```{r}
+qplot(x = estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate, 
+      y = number, 
+      data=census_education5)
+```
+
+```{r}
+ggplot(census_education5, aes(x=log(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate))) + 
+  geom_histogram()
+```
+
+```{r}
+
+```
+
+```{r}
+ggplot(census_education5, aes(x=log(estimate_total_age_by_educational_attainment_population_18_to_24_years))) + 
+  geom_histogram()
+```
+
+```{r}
+ggplot(census_education5, aes(x=log(number))) + 
+  geom_histogram()
+```
+
+```{r}
+symbox(~density, 
+       census_education5, 
+       na.rm=T,
+       powers=seq(-3,3,by=.5))
+```
+
+```{r}
+ggplot(census_education5, aes(x=(density)^0.5)) + 
+  geom_histogram()
+```
+
+```{r}
+qplot(x = log(estimate_total_age_by_educational_attainment_population_18_to_24_years_less_than_high_school_graduate), 
+      y = log(density),
+      data=census_education5)
+```
+
+```{r}
+#save the residuals into your dataframe
+
+model_data <- model2 %>%
+  augment(., Regressiondata)
+
+#plot residuals
+model_data%>%
+dplyr::select(.resid)%>%
+  pull()%>%
+  qplot()+ 
+  geom_histogram()
+```
+
+```{r}
+Regressiondata2<- census_education5%>%
+  clean_names()%>%
+  dplyr::select(density,estimate_total_age_by_educational_attainment_population_18_to_24_years,number)
+
+Regressiondata2 <- Regressiondata2 %>% 
+  mutate(log_number=log(number)) %>% 
+  mutate(log_pop=log(estimate_total_age_by_educational_attainment_population_18_to_24_years)) %>% 
+  filter(log_pop!=-Inf)
+
+model2 <- lm(density ~ log_pop, data = Regressiondata2)
+
+#show the summary of those outputs
+tidy(model2)
+```
+
+```{r}
+summary(model2)
+```
+
+```{r}
+glance(model2)
+```
+
+```{r}
+#and for future use, write the residuals out
+model_data2 <- model2 %>%
+  augment(., Regressiondata2)
+census_education5 <- census_education5 %>% 
+  mutate(log_pop=log(estimate_total_age_by_educational_attainment_population_18_to_24_years)) %>% 
+  filter(log_pop!=-Inf)
+# also add them to the shapelayer
+census_education5 <- census_education5 %>%
+  mutate(model2resids = residuals(model2))
+```
+
+```{r}
+residuals(model2)
+```
+
+```{r}
+library(corrr)
+
+Correlation <- census_education5 %>%
+  st_drop_geometry()%>%
+  dplyr::select(average_gcse_capped_point_scores_2014,
+         unauthorised_absence_in_all_schools_percent_2013,
+         median_house_price_2014) %>%
+  mutate(median_house_price_2014 =log(median_house_price_2014))%>%
+    correlate() %>%
+  # just focus on GCSE and house prices
+  focus(-average_gcse_capped_point_scores_2014, mirror = TRUE) 
+
+
+#visualise the correlation matrix
+rplot(Correlation)
 ```
