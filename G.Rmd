@@ -390,14 +390,14 @@ dplyr::select(.resid)%>%
 ```{r}
 Regressiondata2<- census_education5%>%
   clean_names()%>%
-  dplyr::select(density,estimate_total_age_by_educational_attainment_population_18_to_24_years,number)
+  dplyr::select(density,estimate_total_age_by_educational_attainment_population_18_to_24_years,number,)
 
 Regressiondata2 <- Regressiondata2 %>% 
   mutate(log_number=log(number)) %>% 
   mutate(log_pop=log(estimate_total_age_by_educational_attainment_population_18_to_24_years)) %>% 
   filter(log_pop!=-Inf)
 
-model2 <- lm(density ~ log_pop, data = Regressiondata2)
+model2 <- lm(density ~ log_pop+number, data = Regressiondata2)
 
 #show the summary of those outputs
 tidy(model2)
@@ -431,16 +431,124 @@ residuals(model2)
 library(corrr)
 
 Correlation <- census_education5 %>%
-  st_drop_geometry()%>%
-  dplyr::select(average_gcse_capped_point_scores_2014,
-         unauthorised_absence_in_all_schools_percent_2013,
-         median_house_price_2014) %>%
-  mutate(median_house_price_2014 =log(median_house_price_2014))%>%
-    correlate() %>%
+  dplyr::select(census_education5$density,estimate_total_age_by_educational_attainment_population_18_to_24_years,number) %>%correlate() %>%
   # just focus on GCSE and house prices
-  focus(-average_gcse_capped_point_scores_2014, mirror = TRUE) 
+  focus(-density, mirror = TRUE) 
 
 
 #visualise the correlation matrix
 rplot(Correlation)
+
 ```
+
+```{r}
+Regressiondata2$estimate_total_age_by_educational_attainment_population_18_to_24_years
+```
+
+## vif
+
+```{r}
+position <- c(15:20)
+
+Correlation_all<- census_education5 %>%
+  dplyr::select(position)%>%
+    correlate()
+Correlation_all <- Correlation_all %>%
+  na.omit()
+  
+rplot(Correlation_all)
+```
+
+```{r}
+vif(model2)
+```
+
+```{r}
+#print some model diagnositcs. 
+par(mfrow=c(2,2))    #plot to 2 by 2 array
+plot(model2)
+```
+
+```{r}
+#run durbin-watson test
+DW <- durbinWatsonTest(model2)
+tidy(DW)
+```
+
+```{r}
+#now plot the residuals
+tmap_mode("view")
+#qtm(LonWardProfiles, fill = "model1_resids")
+census_education5 = st_as_sf(census_education5)
+tm_shape(census_education5) +
+  tm_polygons("model2resids") +
+tm_shape(points_sf_joined) + tm_dots(col = "density")
+```
+
+```{r}
+#calculate the centroids of all Wards in London
+coordsW <- census_education5%>%
+  st_centroid()%>%
+  st_geometry()
+
+plot(coordsW)
+```
+
+```{r}
+#Now we need to generate a spatial weights matrix 
+#(remember from the lecture a couple of weeks ago). 
+#We'll start with a simple binary matrix of queen's case neighbours
+
+LWard_nb <- census_education5 %>%
+  poly2nb(., queen=T)
+
+#or nearest neighbours
+knn_wards <-coordsW %>%
+  knearneigh(., k=4)
+
+LWard_knn <- knn_wards %>%
+  knn2nb()
+
+#plot them
+plot(LWard_nb, st_geometry(coordsW), col="red")
+```
+
+```{r}
+plot(LWard_knn, st_geometry(coordsW), col="blue")
+
+```
+
+```{r}
+#create a spatial weights matrix object from these weights
+
+Lward.queens_weight <- LWard_nb %>%
+  nb2listw(., style="W")
+
+Lward.knn_4_weight <- LWard_knn %>%
+  nb2listw(., style="W")
+```
+
+```{r}
+Queen <- census_education5 %>%
+  st_drop_geometry()%>%
+  dplyr::select(model2resids)%>%
+  pull()%>%
+  moran.test(., Lward.queens_weight)%>%
+  tidy()
+```
+
+```{r}
+Nearest_neighbour <- census_education5 %>%
+  st_drop_geometry()%>%
+  dplyr::select(model2resids)%>%
+  pull()%>%
+  moran.test(., Lward.knn_4_weight)%>%
+  tidy()
+
+Queen
+```
+
+```{r}
+Nearest_neighbour
+```
+1+1
